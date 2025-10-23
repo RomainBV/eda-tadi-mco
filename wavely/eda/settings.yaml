@@ -1,0 +1,105 @@
+# logging
+log_level: DEBUG
+
+# data
+root_dir: /media/rbeauvais/Elements/romainb/2025-n09-TADI-MCO/
+raw_signals_dir: data/
+datasets_dir: results/
+max_long_format_duration: 1800.0
+campaign: TADI
+project: MCO 2025
+source_db: "metadata.db"
+audacity_label_name: "Labels 1.txt"
+
+# Filter parameters
+apply_filter_config:
+  apply_filter: ["highpass"]
+  cutoff: 
+  - 200.0
+  order: 2
+
+
+# data acquisition
+data_acquisition:
+  timezone: 'Europe/Paris'
+
+features:
+  block_duration: 0.04
+  block_overlap: 0
+  aggregation_sliding_window: 5.0
+  features_computer_kwargs:
+    features:
+      - bandleq
+      - spectralcentroid
+      - spectralflatness
+      - ultrasoundlevel
+    band_freq: "third"
+  leak_models:
+    expert_model: 
+      enabled: true
+      min_limit_mean: 2
+      max_limit_std: 1
+      max_limit_spectralflatness: 
+      ultrasound_threshold_db: 15.0
+    ml_model: False
+
+# Recording labels
+labels:
+  label_replacements:
+    leak_Q251_D3: "leak > 1 Mach"
+    leak_Q84_D3: "leak [0.5-1] Mach"
+    leak_Q42_D3: "leak [0.1-0.5] Mach"
+    leak_Q502_D5: "leak > 1 Mach"
+    leak_Q335_D5: "leak [0.5-1] Mach"
+    leak_Q168_D5: "leak [0.1-0.5] Mach"
+    leak_Q461_D6: "leak [0.5-1] Mach"
+    leak_Q184_D10: "leak < 0.1 Mach"
+
+  label_removals:
+    - "alarme"
+
+  label_background: []
+data_selection:
+  MAGNETO:
+    sensor_ids:
+      - sensor_id: "RCA-04"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+      - sensor_id: "RCA-06"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+      - sensor_id: "RCA-07"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+      - sensor_id: "RCA-08"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+      - sensor_id: "RCA-09"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+      - sensor_id: "RDA-04"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+      - sensor_id: "ROGUE4"
+        dates: ["2025-10-10"]
+        recording_type: "continuous"
+        calibrate: True
+        time_shift_ms: 0.0
+
+visualization:
+  frequency_scale: 'linear'
+  base_plot_height: 300
+  features_count_per_plot: 2
+  primary_labels: []
