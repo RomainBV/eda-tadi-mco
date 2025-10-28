@@ -94,21 +94,17 @@ def remove_jumps(group, threshold):
     
     return group.drop(to_drop)
 
-def plot_detection_vs_distance(df, col_ml='ml_leak_mean', col_expert='expert_leak_mean'):
+def plot_detection_vs_distance(df_det_grouped, df_config, Tests_correspondances):
     """
-    Trace deux subplots : ML leak mean et Expert leak mean vs distance et ejection_speed.
-    Ajoute une droite de détection correspondant à la limite 50% à partir des valeurs colormap.
-    
-    Args:
-        df : DataFrame contenant au moins les colonnes ['distance_m', 'ejection_speed', 'sensor_clean', col_ml, col_expert]
-        col_ml : nom de la colonne ML leak mean
-        col_expert : nom de la colonne Expert leak mean
+    Trace les nuages ML/Expert vs distance et vitesse d’éjection,
+    calcule la limite de détection à 50 % (logistique),
+    et renvoie deux tableaux :
+      - table_theo : distance limite (m) par vitesse (0→700 m/s, pas de 100)
+      - table_real : distance limite (m) par test réel (Qm, D, vitesse)
     """
-    
-    colorscale = [[0,'#FF0000'], [1,'#00FF00']]  # rouge vif → vert vif
 
-    def add_detection_boundary(df, col_value):
-        # Scatter
+    # === Fonction utilitaire pour un modèle (ML ou Expert) ===
+    def fit_and_plot(df, col_value, col_idx):
         scatter = go.Scatter(
             x=df['distance_m'],
             y=df['ejection_speed'],
@@ -116,27 +112,28 @@ def plot_detection_vs_distance(df, col_ml='ml_leak_mean', col_expert='expert_lea
             marker=dict(
                 size=12,
                 color=df[col_value],
-                colorscale=colorscale,
+                colorscale=[[0, '#FF0000'], [1, '#00FF00']],
                 cmin=0, cmax=100,
-                colorbar=dict(title="(%)")
+                colorbar=dict(title=f"{col_value} (%)") if col_idx == 1 else None
             ),
             text=df['sensor_clean'],
-            hovertemplate=f"Sensor: {{text}}<br>{col_value}: %{{marker.color:.1f}}<br>Distance: {{x:.2f}} m<br>Ejection: {{y:.2f}} m/s",
+            hovertemplate=f"Sensor: {{text}}<br>{col_value}: %{{marker.color:.1f}}%<br>"
+                          "Distance: %{x:.1f} m<br>Ejection: %{y:.1f} m/s",
             showlegend=False
         )
-        
-        # Classification pour seuil 50%
-        y_class = (df[col_value] >= 50).astype(int)
+
+        # Classification binaire (>=50 %)
+        y = (df[col_value] >= 50).astype(int)
         X = df[['distance_m', 'ejection_speed']].values
 
         clf = LogisticRegression()
-        clf.fit(X, y_class)
+        clf.fit(X, y)
 
+        # Frontière
         x_vals = np.linspace(0, 60, 100)
-        coef_distance = clf.coef_[0][0]
-        coef_ejection = clf.coef_[0][1]
-        intercept = clf.intercept_[0]
-        y_vals = (-coef_distance*x_vals - intercept)/coef_ejection
+        a, b = clf.coef_[0]
+        c = clf.intercept_[0]
+        y_vals = (-a * x_vals - c) / b
 
         boundary = go.Scatter(
             x=x_vals, y=y_vals,
@@ -145,32 +142,88 @@ def plot_detection_vs_distance(df, col_ml='ml_leak_mean', col_expert='expert_lea
             showlegend=False
         )
 
-        return [scatter, boundary]
+        # Table théorique (vitesses de 0 à 700 m/s par pas de 100)
+        speeds = np.arange(0, 701, 100)
+        distances = (-b * speeds - c) / a
+        distances = np.clip(distances, 0, None).round().astype(int)
 
-    # --- Subplots ---
-    fig = make_subplots(
-        rows=1, cols=2, shared_xaxes=True,shared_yaxes=True,
-        subplot_titles=("ML leak model", "Expert leak model"),
-        horizontal_spacing=0.08  
-    )
+        table = pd.DataFrame({
+            "Vitesse (m/s)": speeds,
+            f"{col_value}_limite (m)": distances
+        })
 
-    for trace in add_detection_boundary(df, col_ml):
-        fig.add_trace(trace, row=1, col=1)
+        return scatter, boundary, clf, table
 
-    for trace in add_detection_boundary(df, col_expert):
-        fig.add_trace(trace, row=1, col=2)
+    # === Création du graphique ===
+    fig = make_subplots(rows=1, cols=2, shared_xaxes=True,
+                        subplot_titles=("ML leak mean", "Expert leak mean"))
 
-    # --- Layout ---
-    fig.update_xaxes(title_text="Distance to leak (m)", range=[0, 60], row=1, col=1)
-    fig.update_xaxes(title_text="Distance to leak (m)", range=[0, 60], row=1, col=2)
-    fig.update_yaxes(title_text="Outlet ejection speed (m/s)", range=[0, 700], row=1, col=1)
+    scatter_ml, boundary_ml, clf_ml, table_ml = fit_and_plot(df_det_grouped, 'ml_leak_mean', 1)
+    scatter_expert, boundary_expert, clf_expert, table_expert = fit_and_plot(df_det_grouped, 'expert_leak_mean', 2)
+
+    fig.add_trace(scatter_ml, row=1, col=1)
+    fig.add_trace(boundary_ml, row=1, col=1)
+    fig.add_trace(scatter_expert, row=1, col=2)
+    fig.add_trace(boundary_expert, row=1, col=2)
+
+    # Axes
+    for c in [1, 2]:
+        fig.update_xaxes(title_text="Distance à la fuite réelle (m)", range=[0, 60], row=1, col=c)
+        fig.update_yaxes(title_text="Vitesse d’éjection (m/s)", range=[0, 700], row=1, col=c)
 
     fig.update_layout(
         width=1000, height=500,
-        showlegend=False  # aucune légende, seules les colorbars restent visibles
+        title="Limite de détection à 50% (ML vs Expert)",
+        showlegend=False
     )
 
     fig.show()
+
+    # === TABLEAU 1 : Limites théoriques ===
+    table_theo = pd.merge(table_ml, table_expert, on="Vitesse (m/s)", how="outer")
+    table_theo = table_theo.set_index("Vitesse (m/s)").T
+    table_theo.index = ["ML limite (m)", "Expert limite (m)"]
+
+    # === TABLEAU 2 : Limites réelles par test ===
+    tests = df_det_grouped[['label', 'ejection_speed']].drop_duplicates().copy()
+    tests['test_num'] = tests['label'].map(Tests_correspondances)
+
+    # Calcul des distances limites (arrondies à l’entier)
+    tests['ML_limite (m)'] = (
+        (-clf_ml.coef_[0][1] * tests['ejection_speed'] - clf_ml.intercept_[0]) / clf_ml.coef_[0][0]
+    ).clip(0).round().astype(int)
+
+    tests['Expert_limite (m)'] = (
+        (-clf_expert.coef_[0][1] * tests['ejection_speed'] - clf_expert.intercept_[0]) / clf_expert.coef_[0][0]
+    ).clip(0).round().astype(int)
+
+    # --- Ajout du débit massique et diamètre ---
+    # Correction : on utilise "Internal diameter - (mm)"
+    col_diam = 'Internal diameter - (mm)' if 'Internal diameter - (mm)' in df_config.columns else 'Leak diameter - (mm)'
+
+    df_info = df_config[['Test N°', 'flowrate - (g/s)', col_diam]].rename(columns={
+        'Test N°': 'test_num',
+        'flowrate - (g/s)': 'Qm (g/s)',
+        col_diam: 'D (mm)'
+    })
+
+    table_real = tests.merge(df_info, on='test_num', how='left')
+    table_real = table_real.sort_values('ejection_speed').reset_index(drop=True)
+
+    table_real = table_real.set_index('label')[[
+        'test_num', 'Qm (g/s)', 'D (mm)', 'ejection_speed', 
+        'ML_limite (m)', 'Expert_limite (m)'
+    ]]
+    table_real['test_num'] = table_real['test_num'].astype(int)
+    table_real = table_real.sort_values(by='test_num')
+    # === AFFICHAGE ===
+    print("\n=== Table 1 : Limite de détection par vitesse ===")
+    display(table_theo)
+
+    print("\n=== Table 2 : Limite de détection par test ===")
+    display(table_real)
+
+    return table_theo, table_real
 
 def compute_detection_dataframe(df_stat_local, df_positions, df_config, Tests_correspondances):
     """
@@ -447,8 +500,18 @@ def update_plot_deployment(test_num):
                 marker=dict(
                     size=14,
                     color=df_used[f'{freq_loc}_mean'],
-                    colorscale='Viridis',
-                    colorbar=dict(title=f"Niveau {freq_loc} (dB)", x=1.02, y=0.25, len=0.5),
+                    colorscale=[
+                        [0, "lightgray"],  # bas de l'échelle
+                        [1, 'rgb(0,166,185)']       # haut de l'échelle
+                    ],
+                    cmin=10,  # borne minimale
+                    cmax=40,  # borne maximale
+                    colorbar=dict(
+                        title=f"Niveau {freq_loc} (dB)",
+                        x=1.02,
+                        y=0.25,
+                        len=0.5
+                    ),
                     sizemode='diameter'
                 ),
                 text=df_used.index,
@@ -510,7 +573,7 @@ def update_plot_deployment(test_num):
     fig.add_trace(go.Scatter(
         x=[x_real], y=[y_real],
         mode='markers',
-        marker=dict(color='green', size=16, symbol='diamond'),
+        marker=dict(color='black', size=16, symbol='diamond'),
         name='Position réelle'
     ), row=1, col=2)
 
@@ -979,6 +1042,7 @@ for _, row in df_config.iterrows():
 
 
     # Calcul de la position centrale pondérée avec la règle -6dB par doublement de distance
+    # Autrement dit : décroissance de p ~ 1/r (i.e : I ~ 1/r²)
     # Convertir les niveaux dB en "pression relative"
     weights = 10 ** (df_merge[f'{freq}_mean'] / 20)
 
@@ -1026,27 +1090,43 @@ print(f"mean localization error: {round(df_localisation['diff_total'].mean(),2)}
 # ==== Taux de détection
 df_det = df_stat_local[df_stat_local['label'].str.contains('Q', case=False, na=False)]
 df_other = df_stat_local[~df_stat_local['label'].str.contains('Q', case=False, na=False)]
-
-# Moyenne par capteur (sensor)
-mean_det = (
-    df_det.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
-    .mean()
-    .mul(100)  # conversion en pourcentage
-    .reset_index()
-)
-mean_other = (
-    df_other.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
-    .mean()
-    .mul(100)
-    .reset_index()
-)
-# Taux maximal par label (tous capteurs confondus)
 max_per_label = (
     df_stat_local.groupby("label")[["expert_leak_mean", "ml_leak_mean"]]
     .max()
     .mul(100)
     .reset_index()
 )
+# --- Taux maximal par label (tous capteurs confondus) ---
+max_per_label = (
+    df_stat_local.groupby("label")[["expert_leak_mean", "ml_leak_mean"]]
+    .max()
+    .mul(100)
+    .reset_index()
+)
+max_per_label["test_num"] = max_per_label["label"].map(Tests_correspondances).astype(pd.Int64Dtype())
+max_per_label = max_per_label.sort_values("test_num", na_position="last").reset_index(drop=True)
+
+# --- Moyenne par capteur pour les détections (labels contenant "Q") ---
+mean_det = (
+    df_det.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
+    .mean()
+    .mul(100)
+    .reset_index()
+)
+if "label" in df_det.columns:
+    label_map_det = df_det.groupby("sensor")["label"].first()
+    mean_det["label"] = mean_det["sensor"].map(label_map_det)
+
+# --- Moyenne par capteur pour les autres labels ---
+mean_other = (
+    df_other.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
+    .mean()
+    .mul(100)
+    .reset_index()
+)
+if "label" in df_other.columns:
+    label_map_other = df_other.groupby("sensor")["label"].first()
+    mean_other["label"] = mean_other["sensor"].map(label_map_other)
 
 mean_det = mean_det.round(0)
 mean_other = mean_other.round(0)
@@ -1076,7 +1156,7 @@ display(df_test_summary)
 # === Static visu. ===
 # ====================
 
-plot_detection_vs_distance(df_det_grouped)
+table_theo, table_real = plot_detection_vs_distance(df_det_grouped, df_config, Tests_correspondances)
 
 # =====================
 # === Dynamic visu. ===
