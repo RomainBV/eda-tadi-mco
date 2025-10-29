@@ -61,7 +61,7 @@ mc cp --recursive data2/... data/MAGNETO/<sensor_ID> <Local_folder_path>
 ```bash
 streamlit run preprocessing.py
 ```
-This opens a Streamlit interface for raw data preprocessing.
+This opens a Streamlit interface for raw data preprocessing. Launch the computation for each sensor, making sure to select the correct test date.
 ### 6. Data annotation:
 Annotate raw data using tools like Audacity, following
 `TADI - All datasets analyses.xlsx`
@@ -71,24 +71,24 @@ Refer to the Streamlit interface for detailed instructions on how to perform ann
 ```bash
 streamlit run processing.py
 ```
-This computes labeled features and runs Expert Leak Detection.
+This computes labeled features and runs Expert Leak Detection. Launch the computation for each sensor, making sure to select the correct test date. The results are stored into `data/MAGNETO/<sensor_ID/results/<sensor_ID>/features.h5`
 ### 8. Machine Learning Leak Detection:
 Activate the ML environment and run:
 ```bash
 streamlit run ml_leak_predict_from_onnx.py
 ```
-The results are automatically aggregated into results/<sensor_ID>/features.h5.
+The results are automatically aggregated into `data/MAGNETO/<sensor_ID/results/<sensor_ID>/features.h5`. 
 
 ### 9. Postprocessing and Visualization:
 Reactivate the feature environment and run:
 ```bash
 streamlit run postprocessing.py
 ```
-Opens a Streamlit dashboard for visualizing:
+Opens a new Streamlit interface for dynamic, time-based visualization of the results.
 - Features
 - Expert Leak Detection
 - ML Leak Detection
-- Spectrograms over time
+- Spectrograms
 
 Enables precise temporal comparison of model performance.
 
