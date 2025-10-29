@@ -1,9 +1,0 @@
-[tool.black]
-line-length = 88
-exclude = '''
-/(
-    setup.cfg
-)/
-'''
-[build-system]
-requires = ["setuptools>=40.8.0", "wheel"]
