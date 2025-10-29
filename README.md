@@ -46,7 +46,7 @@ Add client annotation data to:
 ### 2. Retrieve server data
 From [TADI Cerebro Server](https://tadi.cerebro.wavely.fr/):  
 Export **sound levels** and **leak detection data** via  
-**More → Export CSV**, then insert them into:  
+**More → Export CSV** from affiliated Dasboards, then insert them into:  
 `TADI_MCO-2025_Sound-levels_Leak-detection.xls
 ### 3. Prepare data environment:
 Create and activate a virtual environment, then install dependencies:
