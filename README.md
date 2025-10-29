@@ -1,5 +1,6 @@
 # Detection and Localization of Leaks on TADI - MCO
 author : Romain B
+
 ## Overview
 New-generation sensors (Rogue board and Infineon microphones) are more sensitive than Vesper in the ultrasonic domain, making them better suited for gas leak detection.  
 This new hardware integration required an update of the machine-learning-based leak detection model.  
@@ -24,18 +25,30 @@ Evaluation is conducted through several experiments, each documented with report
 ---
 
 ## Environments and Dependencies
-Two separate virtual environments (**venv**) are required because the `signal` version of `datasets-analysis` is incompatible with `waveleaks`.
 
-- **Feature extraction environment:**  
-  Install dependencies using  
-  ```bash
-  pip install -r requirements_features.txt
-  ```
-- **Leak detection environment:**
-  Install dependencies using
-  ```bash
-  pip install -r requirements_venv_leak_detection_model.txt
-  ```
+The installation is not straightforward because `datasets-analysis` is incompatible with several recent package versions.
+
+The procedure is as follows:
+
+1. **Clone the required Wavely package repositories** (using the specified versions):
+   - `wavely.signal` (v0.9.0)
+   - `wavely.edge-metadata` (v0.3.5)
+   - `wavely.metadata` (v0.3.4)
+   - `wavely.datasets-analysis` (master — v1.1.0)
+
+2. **Create a virtual environment** using Python 3.10:  
+   `/usr/bin/python3.10 -m venv <path_to_venv>`
+
+3. **Install each repository in editable mode** in the order listed above:  
+   `pip install -e .[dev]`
+
+4. **Install additional dependencies**:  
+   `pip install --no-deps -r requirements_venv_leak_detection_model.txt`
+
+> ⚠️ Note: Two separate virtual environments (**venvs**) are required because the `wavely.signal` version of `datasets-analysis` is incompatible with `waveleaks`.  
+> The second virtual environment should have the `waveleaks` package installed along with the same dependencies:  
+> `pip install --no-deps -r requirements_venv_leak_detection_model.txt`
+
 
 ### 1. Update annotations
 Add client annotation data to:  
