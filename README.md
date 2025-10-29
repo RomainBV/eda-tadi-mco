@@ -65,6 +65,7 @@ This opens a Streamlit interface for raw data preprocessing.
 ### 6. Data annotation:
 Annotate raw data using tools like Audacity, following
 `TADI - All datasets analyses.xlsx`
+Refer to the Streamlit interface for detailed instructions on how to perform annotations.
 
 ### 7. Feature computation and Expert model:
 ```bash
