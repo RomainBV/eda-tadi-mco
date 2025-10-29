@@ -55,7 +55,7 @@ pip install -r requirements_features.txt
 ```
 ### 4. Download data:
 ```bash
-mc cp --recursive data2/... data/MAGNETO/<sensor_ID> <local folder path>
+mc cp --recursive data2/... data/MAGNETO/<sensor_ID> <Local_folder_path>
 ```
 ### 5. Preporcessing
 ```bash
