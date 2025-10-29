@@ -522,6 +522,23 @@ def update_plot_deployment(test_num):
             row=1, col=2
         )
 
+    for _, sensor in df_used.iterrows():
+        fig.add_trace(
+            go.Scatter(
+                x=[sensor['x (m)'], x_est],
+                y=[sensor['y (m)'], y_est],
+                mode="lines",
+                line=dict(
+                    color="rgb(0,166,185)",
+                    dash="dot",
+                    width=1.5
+                ),
+                showlegend=False,
+                hoverinfo="skip"
+            ),
+            row=1, col=2
+        )
+
     # Capteurs non utilisés avec contour gris (facultatif)
     if not df_unused.empty:
         fig.add_trace(
