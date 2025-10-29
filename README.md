@@ -102,16 +102,30 @@ Generates statistical tables and figures for final reporting.
 ---
 ## Repository Structure
 ```bash 
-data/
-  └── MAGNETO/
-      └── <sensor_ID>/
-results/
-  └── <sensor_ID>/
-      └── features.h5
-scripts/
-  ├── preprocessing.py
-  ├── processing.py
-  ├── ml_leak_predict_from_onnx.py
-  ├── postprocessing.py
-  └── Leak_localisation_analysis.py
+├── preprocessing.py   # Data preprocessing pipeline (Streamlit interface)
+├── processing.py      # Feature computation and Expert leak detection (Streamlit interface)
+├── postprocessing.py  # Visualization and post-analysis (Streamlit interface)
+├── ml_leak_predict_from_onnx.py   # Machine Learning leak detection (ONNX model)
+├── Leak_localisation_analysis.py  # Statistical and localization analysis
+│
+├── data/ # Raw and processed data
+│ └── MAGNETO/
+│     └── <sensor_ID>/ # Individual sensor folders
+│         └── <date (YYYY-MM-DD)>/     # Test date
+│             └── results/             # Output files (e.g., features.h5)
+│             └── formatted_data/      # concatenated raw data (created during the after the preprocessing process)
+│             └── labels/              # csv with annotations (created during the after the preprocessing process and hand made annotations based on formatted_data)
+│
+│
+├── Wavely/ # Internal analysis modules
+│ └── eda/ # Exploratory Data Analysis tools
+│
+├── plots/ # Generated figures and reports
+│ └── <date (YYYY-MM-DD)>/ # Test date
+│
+│
+├── <features_env/>
+├── <leak_detection_env/>
+│
+└── README.md
 ```
