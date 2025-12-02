@@ -722,7 +722,7 @@ def computation(settings,sensor,sensor_id,date,selected_configuration):
         leak_detection = leak_detection.rename(columns={"leak": "leak_ml_mean"})
 
 
-        root_dirname = Path(data_path) / 'results' / f"ch{channel}"
+        root_dirname = Path(data_path) / 'results' 
         os.makedirs(root_dirname, exist_ok=True)
 
         features_path = root_dirname.joinpath("features.h5")

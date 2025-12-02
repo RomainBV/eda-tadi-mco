@@ -1,6 +1,7 @@
 #%%
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from ipywidgets import widgets
 from IPython.display import display
@@ -10,14 +11,21 @@ from typing import  Dict, List
 from pathlib import Path
 from sklearn.linear_model import LogisticRegression
 import re
+from datetime import timedelta
 
 root_dir = "/media/rbeauvais/Elements/romainb/2025-n09-TADI-MCO"
 os.chdir(root_dir)
 print(root_dir)
 
+### WARNING : s'assurer que les colonnes de TADI_MCO-2025_Sound-levels_Leak-detection soient bien au format "Nombre" avant de lancer la compilation
+# ET remplacer les '.' par des ','
+ 
+start_str = '2025-10-27'
+end_str = '2025-11-01'
+local_analysis = False
+save_fig = True
 
-start_str = '2025-10-10'
-end_str = '2025-10-11'
+min_emergence = 6
 leak_configurations = "TADI - All datasets analyses.xlsx"
 sensors = ['RDA-04','RCA-07','RCA-08','RCA-04','RCA-09','RCA-06','ROGUE4']
 results = 'TADI_MCO-2025_Sound-levels_Leak-detection.xlsx'
@@ -29,8 +37,7 @@ data = {
     "y (m)": [28.9, -0.3, -0.3, -0.3, 29.0, 55.5, 11.4],
     "z (m)": [3, 3, 3, 3, 3, 3, 5.45]
 }
-channel = 1
-min_emergence = 10
+
 
 # A retirer pour plus
 Tests_correspondances = {'other' : None, 
@@ -43,7 +50,19 @@ Tests_correspondances = {'other' : None,
                          'alarme' : None, 
                          'leak_Q461_D6' : 7,
                          'leak_Q184_D10' : 8, 
-                         'purge' : None}
+                         'purge' : None,
+                         'leak_Q336_D6' : '1A', 
+                         'leak_Q288_D6' : '1B', 
+                         'leak_Q240_D6' : '1C', 
+                         'leak_Q91_D1.8' : '2A', 
+                         'leak_Q62_D1.8' : '2B',
+                         'leak_Q24_D1.8' : '2C',
+                         'leak_Q768_D10' : '3A', 
+                         'leak_Q648_D10' : '3B',
+                         'leak_Q528_D10' : '3C', 
+                         'machine tournante' : None,
+                         'bruit type écoulement interne' : None,
+                         'sirène' : None }
 
 
 def read_hdf_dataset(
@@ -79,12 +98,18 @@ def remove_jumps(group, threshold):
     jump_positions = time_diff[time_diff > threshold].index
     
     to_drop = set()
-    locs = group.index.to_series().index  # positions dans le DataFrame
-    
+    index_values = group.index  # MultiIndex du groupe
+
     for idx in jump_positions:
-        loc = locs.get_loc(idx)
-        start = max(loc - 2, 0)        # au moins la première ligne
-        end = min(loc + 3, len(group)) # +3 car end exclu
+        # ⚠️ skip si le timestamp n'est pas dans l'index
+        if idx not in index_values:
+            continue
+        
+        # Position dans le groupe
+        loc = index_values.get_loc(idx)
+
+        start = max(loc - 2, 0)
+        end = min(loc + 3, len(group))
         to_drop.update(group.iloc[start:end].index)
     
     # Ajouter les 2 premières et 2 dernières lignes du groupe
@@ -92,7 +117,7 @@ def remove_jumps(group, threshold):
         to_drop.update(group.iloc[:2].index)
         to_drop.update(group.iloc[-2:].index)
     
-    return group.drop(to_drop)
+    return group.drop(to_drop, errors="ignore")
 
 def plot_detection_vs_distance(df_det_grouped, df_config, Tests_correspondances):
     """
@@ -214,7 +239,9 @@ def plot_detection_vs_distance(df_det_grouped, df_config, Tests_correspondances)
         'test_num', 'Qm (g/s)', 'D (mm)', 'ejection_speed', 
         'ML_limite (m)', 'Expert_limite (m)'
     ]]
-    table_real['test_num'] = table_real['test_num'].astype(int)
+    table_real["test_num"] = pd.to_numeric(
+        table_real["test_num"], errors="coerce"
+    ).astype("Int64")
     table_real = table_real.sort_values(by='test_num')
     # === AFFICHAGE ===
     print("\n=== Table 1 : Limite de détection par vitesse ===")
@@ -360,7 +387,6 @@ def create_test_summary(df_stat_local, df_config, Tests_correspondances):
     
     return df_summary
 
-
 def get_test_config(label=None, test_num=None):
     """
     Récupère la configuration d'un test et la position réelle de la fuite.
@@ -386,6 +412,7 @@ def get_test_config(label=None, test_num=None):
     return massic_flowrate, volumic_flowrate, diameter, ejection_speed, x_real, y_real
 
 def update_plot_deployment(test_num):
+    freq_loc = '15 kHz'
     # --- Filtrage des données ---
     df_filtered = df_stat_deployment[df_stat_deployment['Test N°'] == test_num]
     df_loc = df_localisation[df_localisation['Test N°'] == test_num]
@@ -445,24 +472,36 @@ def update_plot_deployment(test_num):
                 row=i, col=1
             )
 
+
+
         # Ylabels avec titre
         fig.update_yaxes(title_text=f"{freq}" if "Hz" in freq else "ML leak det. (%)",
                          title_standoff=40, row=i, col=1)
 
         # Limites Y
-        fig.update_yaxes(range=[0, 50] if "Hz" in freq else [0, 100], row=i, col=1)
+        fig.update_yaxes(range=[0, 60] if "Hz" in freq else [0, 100], row=i, col=1)
         # Xlabels seulement sur la dernière ligne
         if i != len(freq_categories):
             fig.update_xaxes(showticklabels=False, row=i, col=1)
         else:
             fig.update_xaxes(tickangle=45, row=i, col=1)
 
+        if freq_loc in freq:
+            fig.add_shape(
+                type="rect",
+                xref=f"x{i+1} domain",
+                yref=f"y{i+1} domain",
+                x0=0, x1=1,
+                y0=0, y1=1,
+                line=dict(color="rgb(0,166,185)", width=2),
+                fillcolor="rgba(0,0,0,0)"  # transparent
+            )
     # ---------- LIGNES DE SEUIL ----------
     fig.add_hline(y=20, line=dict(color="orange", width=2, dash="dot"), row=len(freq_categories), col=1)
     fig.add_hline(y=50, line=dict(color="green", width=2, dash="dot"), row=len(freq_categories), col=1)
 
     # ---------- PLOT DE LOCALISATION ----------
-    freq_loc = '5-15 kHz'
+    
     used_sensors = []
     if not df_loc.empty and 'sensors_used' in df_loc.columns:
         used_sensors = df_loc['sensors_used'].iloc[0].replace(" ", "").split(',')
@@ -644,9 +683,7 @@ def update_plot_deployment(test_num):
         margin=dict(l=40, r=40, t=40, b=40)
     )
 
-    fig.show()
-
-
+    return fig
 
 def update_plot_local(label):
     # --- Filtrage des données locales pour le label ---
@@ -796,7 +833,7 @@ def update_plot_local(label):
         go.Scatter(
             x=[None], y=[None], mode='markers',
             marker=dict(
-                colorscale=[[0,'#FF0000'], [1,'#00FF00']],  # rouge pétant → vert pétant
+                colorscale=[[0,'#FF0000'], [1,'#00FF00']],  
                 cmin=0, cmax=100,
                 colorbar=dict(title="(%)", x=1.1, y=0.5, len=1, thickness=30)
             ),
@@ -814,7 +851,7 @@ def update_plot_local(label):
         showlegend=False, margin=dict(l=40, r=80, t=60, b=40)
     )
 
-    fig.show()
+    return fig
 
 # ================================
 # DataFrame - Leak configurations
@@ -883,128 +920,198 @@ df_config['end_datetime'] = [
 df_config['start_datetime'] = pd.to_datetime(df_config['start_datetime']).dt.tz_localize('Europe/Paris', nonexistent='NaT', ambiguous='NaT')
 df_config['end_datetime'] = pd.to_datetime(df_config['end_datetime']).dt.tz_localize('Europe/Paris', nonexistent='NaT', ambiguous='NaT')
 
-freq_categories = ['0-1 kHz', '1-5 kHz', '5-15 kHz', '15-45 kHz']
-# Étape 1 : calculer le minimum global par fréquence
+# freq_categories = ['0-1 kHz', '1-5 kHz', '5-15 kHz', '15-45 kHz']
+
+freq_categories = ['0-2 kHz', '5 kHz', '15 kHz', '45 kHz']
+# # Étape 1 : calculer le minimum global par fréquence un un visu en émergence
+
+
 global_min = {}
 for freq in freq_categories:
-    all_values = []
-    for sensor in sensors:
-        df_soundlevels = pd.read_excel(results, sheet_name=sensor, header=[0])
-        numeric_cols = [c for c in df_soundlevels.columns if freq in c]
-        for col in numeric_cols:
-            all_values.extend(pd.to_numeric(df_soundlevels[col], errors='coerce').dropna().values)
-    global_min[freq] = min(all_values) if all_values else None
+    # Lire l'onglet correspondant
+    df = pd.read_excel(results, sheet_name=freq, header=0)
 
-# ----------------------------
-# Analyse statistique
-# ----------------------------
+    df['Time'] = pd.to_datetime(df['Time'], format='ISO8601', errors='coerce')
+    start_date = pd.Timestamp(start_str).tz_localize('Europe/Paris')
+    end_date = pd.Timestamp(end_str).tz_localize('Europe/Paris')
+    mask = (df['Time'] >= start_date) & (df['Time'] <= end_date)
+    df = df.loc[mask]
+    
+    # Extraire les colonnes de capteurs (toutes sauf 'Time')
+    sensor_cols = [col for col in df.columns if col != 'Time']
+    
+    
+    # Calculer le minimum global pour cet onglet
+    all_values = pd.to_numeric(df[sensor_cols].values.flatten(), errors='coerce')
+    global_min[freq] = np.nanmin(all_values)
+
 df_stat_deployment = pd.DataFrame()
 df_stat_local = pd.DataFrame()
 
+# Dictionnaire de correspondance Sensor_ID → Public_ID
+sensor_to_public = dict(zip(data["sensor ID"], data["Public ID"]))
 
 for sensor in sensors:
+    
     # ----------------------------
     # Lecture des données calculées en local
     # ----------------------------
-    datasets_dir = Path("data") / "MAGNETO" / sensor / start_str / "results" / f"ch{channel}"
-    features = read_hdf_dataset(datasets_dir.joinpath("features.h5"))
-    df_features = pd.DataFrame(features['features'])
+    if local_analysis:
+        datasets_dir = Path("data") / "MAGNETO" / sensor / start_str / "results"
+        features = read_hdf_dataset(datasets_dir.joinpath("features.h5"))
+        df_features = pd.DataFrame(features['features'])
 
-    labels = df_features.index.get_level_values('Label').unique()
+        def extract_leak(label):
+            if 'leak' in label:
+                return label.split(' / ')[-1]  # garde la partie après le dernier slash
+            return label
 
-    stats_list = []  # contiendra les stats pour chaque label de ce sensor
+        # Remplacer uniquement le niveau 'Label'
+        df_features.index = df_features.index.set_levels(
+            df_features.index.levels[df_features.index.names.index('Label')].map(extract_leak),
+            level='Label'
+        )
 
-    for label in labels:
-        df_subset = df_features.loc[df_features.index.get_level_values('Label') == label]
-        # Suppression de 15 s avant et après chaque saut temporel pour éviter les effets de bords (i.e, lente réactivité du modèle ou imprécision d'annotation)
-        df_subset = df_subset.groupby(level=['filename','channel','Label'], group_keys=False).apply(remove_jumps, threshold=pd.Timedelta(seconds=15))
+        labels = df_features.index.get_level_values('Label').unique()
 
-        # dictionnaire des statistiques pour un (sensor, label)
-        stats = {
-            'sensor': sensor,
-            'label': label,
-            'ml_leak_min': df_subset['leak_ml_mean'].min(),
-            'expert_leak_min': df_subset['leak_expert_mean'].min(),
-            'ml_leak_max': df_subset['leak_ml_mean'].max(),
-            'expert_leak_max': df_subset['leak_expert_mean'].max(),
-            'ml_leak_mean': df_subset['leak_ml_mean'].mean(),
-            'expert_leak_mean': df_subset['leak_expert_mean'].mean(),
-            'ml_leak_std': df_subset['leak_ml_mean'].std(),
-            'expert_leak_std': df_subset['leak_expert_mean'].std(),
-        }
 
-        stats_list.append(stats)
+        stats_list = []  
 
-    # DataFrame des stats pour ce sensor
-    df_stat_sensor = pd.DataFrame(stats_list)
-    df_stat_local = pd.concat([df_stat_local, df_stat_sensor], ignore_index=True)
+        for label in labels:
+            df_subset = df_features.loc[df_features.index.get_level_values('Label') == label]
 
-    # ----------------------------
-    # Lecture des données de déploiement
-    # ----------------------------
-    df_soundlevels = pd.read_excel(results, sheet_name=sensor, header=[0])
-    df_soundlevels['Time'] = pd.to_datetime(df_soundlevels['Time'], errors='coerce')
-    
-    numeric_cols = df_soundlevels.columns.difference(['Time'])
-    for col in numeric_cols:
-        df_soundlevels[col] = pd.to_numeric(df_soundlevels[col], errors='coerce')
-    
-    df_leak = pd.read_excel(results, sheet_name='Leak-Detection', header=[0])
-    df_leak['Time'] = pd.to_datetime(df_leak['Time'], errors='coerce')
-    numeric_cols_leak = df_leak.columns.difference(['Time'])
-    for col in numeric_cols_leak:
-        df_leak[col] = pd.to_numeric(df_leak[col], errors='coerce')
+            df_subset = df_subset.groupby(
+                level=['filename','channel','Label'], 
+                group_keys=False
+            ).apply(remove_jumps, threshold=pd.Timedelta(seconds=15))
 
-    # ----------------------------
-    # Calcul des statistiques
-    # ----------------------------
+            stats = {
+                'sensor': sensor,
+                'label': label,
+                'ml_leak_min': df_subset['leak_ml_mean'].min(),
+                'expert_leak_min': df_subset['leak_expert_mean'].min(),
+                'ml_leak_max': df_subset['leak_ml_mean'].max(),
+                'expert_leak_max': df_subset['leak_expert_mean'].max(),
+                'ml_leak_mean': df_subset['leak_ml_mean'].mean(),
+                'expert_leak_mean': df_subset['leak_expert_mean'].mean(),
+                'ml_leak_std': df_subset['leak_ml_mean'].std(),
+                'expert_leak_std': df_subset['leak_expert_mean'].std(),
+            }
+
+            stats_list.append(stats)
+
+        
+
+        # Ajouter au DF local
+        df_stat_sensor = pd.DataFrame(stats_list)
+        df_stat_local = pd.concat([df_stat_local, df_stat_sensor], ignore_index=True)
+
+
+    # ================================================================
+    #  LECTURE DES DONNÉES DE DÉPLOIEMENT 
+    # ================================================================
+
+    # Charger toutes les feuilles de fréquences
+    df_soundlevels = {
+        freq: pd.read_excel(results, sheet_name=freq)
+        for freq in freq_categories
+    }
+
+    # Renommer Sensor_ID → Public_ID
+    for freq, df in df_soundlevels.items():
+        df.rename(columns=sensor_to_public, inplace=True)
+
+    # Nettoyage Soundlevels
+    for freq, df in df_soundlevels.items():
+        df["Time"] = pd.to_datetime(df["Time"], errors="coerce")
+        for col in df.columns:
+            if col != "Time":
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # # Concat version finale
+    # df_soundlevels = pd.concat(df_soundlevels.values(), ignore_index=True)
+
+
+    # ---- LEAK DETECTION ----
+    df_leak = pd.read_excel(results, sheet_name="Leak-Detection")
+    df_leak.rename(columns=sensor_to_public, inplace=True)
+
+    df_leak["Time"] = pd.to_datetime(df_leak["Time"], errors="coerce")
+    for col in df_leak.columns:
+        if col != "Time":
+            df_leak[col] = pd.to_numeric(df_leak[col], errors="coerce")
+
+
+    # ================================================================
+    #  CALCUL DES STATISTIQUES DÉPLOIEMENT
+    # ================================================================
     list_results = []
+
     for _, row in df_config.iterrows():
         test_num = row['Test N°']
         if pd.isna(test_num):
-            continue  # Ignore les tests sans numéro
+            continue
 
-        start = row['start_datetime']
-        end = row['end_datetime']
-        
-        # Soundlevels
-        mask = (df_soundlevels['Time'] >= start) & (df_soundlevels['Time'] <= end)
-        subset = df_soundlevels.loc[mask]
-        numeric_cols = subset.select_dtypes(include='number').columns
-        
+        start = row['start_datetime'] + timedelta(seconds=15)
+        end   = row['end_datetime'] - timedelta(seconds=15)
+
         stats = {}
-        # Emergence
-        for col in numeric_cols:
-            freq = None
-            for f in freq_categories:
-                if f in col:
-                    freq = f
-                    break
-            if freq is None:
-                continue
-            min_val_global = global_min[freq]
-            stats[f'{col}_min'] = subset[col].min() - min_val_global 
-            stats[f'{col}_max'] = subset[col].max() - min_val_global 
-            stats[f'{col}_mean'] = subset[col].mean() - min_val_global 
-            stats[f'{col}_std'] = subset[col].std() - min_val_global 
-        # ML Leak
-        mask = (df_leak['Time'] >= start) & (df_leak['Time'] <= end)
-        subset = df_leak.loc[mask]
-        stats['leak_min'] = subset[sensor].min()
-        stats['leak_max'] = subset[sensor].max()
-        stats['leak_mean'] = subset[sensor].mean()
-        stats['leak_std'] = subset[sensor].std()
 
-        # Ajouter le sensor et le test
+        # --- Soundlevels ---
+        
+        for freq in freq_categories:
+            df = pd.DataFrame(df_soundlevels[freq])
+            mask = (df['Time'] >= start) & (df['Time'] <= end)
+            subset = df.loc[mask]
+
+
+            if sensor not in subset.columns:
+                continue
+
+            subset_freq = subset  # toutes fréquences ont sensor
+
+            min_val_global = global_min[freq]
+
+            stats[f'{freq}_min']  = subset_freq[sensor].min()  - min_val_global
+            stats[f'{freq}_max']  = subset_freq[sensor].max()  - min_val_global
+            stats[f'{freq}_mean'] = subset_freq[sensor].mean() - min_val_global
+            stats[f'{freq}_std']  = subset_freq[sensor].std()  - min_val_global
+            
+
+        # --- ML Leak ---
+        mask_leak = (df_leak['Time'] >= start) & (df_leak['Time'] <= end)
+        subset_leak = df_leak.loc[mask_leak, sensor]
+
+        stats['leak_min'] = subset_leak.min()
+        stats['leak_max'] = subset_leak.max()
+        stats['leak_mean'] = subset_leak.mean()
+        stats['leak_std'] = subset_leak.std()
+
         stats['Test N°'] = test_num
-        stats['sensor'] = sensor
+        stats['sensor']  = sensor
+
         list_results.append(stats)
-    
+
     df_stat = pd.DataFrame(list_results)
     df_stat_deployment = pd.concat([df_stat_deployment, df_stat], ignore_index=True)
 
+# Nettoyage final
 df_stat_deployment = df_stat_deployment.dropna(subset=['Test N°'])
 
+# tri des colonnes dans l'ordre logique
+freq_cols = []
+for f in freq_categories:
+    freq_cols += [f"{f}_min", f"{f}_max", f"{f}_mean", f"{f}_std"]
+
+ordered_cols = freq_cols + ["leak_min", "leak_max", "leak_mean", "leak_std", "Test N°", "sensor"]
+
+df_stat_deployment = df_stat_deployment[ordered_cols]
+
+
+
+# # ----------------------------------------------------------------------
+# # EXPORT
+# # ----------------------------------------------------------------------
 
 
 df_positions = pd.DataFrame(data)
@@ -1019,7 +1126,7 @@ df_localisation = pd.DataFrame(columns=[
 ])
 
 
-freq = '5-15 kHz'
+freq = '15 kHz'
 ignore_sensor = 'ROGUE4'  
 max_sensors_used = 5  # nombre max de capteurs à conserver
 
@@ -1105,62 +1212,62 @@ print(f"mean localization error: {round(df_localisation['diff_total'].mean(),2)}
 
 
 # ==== Taux de détection
-df_det = df_stat_local[df_stat_local['label'].str.contains('Q', case=False, na=False)]
-df_other = df_stat_local[~df_stat_local['label'].str.contains('Q', case=False, na=False)]
-max_per_label = (
-    df_stat_local.groupby("label")[["expert_leak_mean", "ml_leak_mean"]]
-    .max()
-    .mul(100)
-    .reset_index()
-)
-# --- Taux maximal par label (tous capteurs confondus) ---
-max_per_label = (
-    df_stat_local.groupby("label")[["expert_leak_mean", "ml_leak_mean"]]
-    .max()
-    .mul(100)
-    .reset_index()
-)
-max_per_label["test_num"] = max_per_label["label"].map(Tests_correspondances).astype(pd.Int64Dtype())
-max_per_label = max_per_label.sort_values("test_num", na_position="last").reset_index(drop=True)
+if local_analysis:
+    df_det = df_stat_local[df_stat_local['label'].str.contains('Q', case=False, na=False)]
+    df_other = df_stat_local[~df_stat_local['label'].str.contains('Q', case=False, na=False)]
+    max_per_label = (
+        df_stat_local.groupby("label")[["expert_leak_mean", "ml_leak_mean"]]
+        .max()
+        .mul(100)
+        .reset_index()
+    )
+    # --- Taux maximal par label (tous capteurs confondus) ---
+    max_per_label = (
+        df_stat_local.groupby("label")[["expert_leak_mean", "ml_leak_mean"]]
+        .max()
+        .mul(100)
+        .reset_index()
+    )
 
-# --- Moyenne par capteur pour les détections (labels contenant "Q") ---
-mean_det = (
-    df_det.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
-    .mean()
-    .mul(100)
-    .reset_index()
-)
-if "label" in df_det.columns:
-    label_map_det = df_det.groupby("sensor")["label"].first()
-    mean_det["label"] = mean_det["sensor"].map(label_map_det)
+    max_per_label["test_num"] = (
+        max_per_label["label"]
+            .map(Tests_correspondances)
+    )
 
-# --- Moyenne par capteur pour les autres labels ---
-mean_other = (
-    df_other.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
-    .mean()
-    .mul(100)
-    .reset_index()
-)
-if "label" in df_other.columns:
-    label_map_other = df_other.groupby("sensor")["label"].first()
-    mean_other["label"] = mean_other["sensor"].map(label_map_other)
+    # Conversion sécurisée vers entier nullable
+    max_per_label["test_num"] = pd.to_numeric(
+        max_per_label["test_num"], errors="coerce"
+    ).astype("Int64")
 
-mean_det = mean_det.round(0)
-mean_other = mean_other.round(0)
-max_per_label = max_per_label.round(0)
+    # --- Moyenne par capteur pour les détections (labels contenant "Q") ---
+    mean_det = (
+        df_det.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
+        .mean()
+        .mul(100)
+        .reset_index()
+    )
+    # --- Moyenne par capteur pour les autres labels ---
+    mean_other = (
+        df_other.groupby("sensor")[["expert_leak_mean", "ml_leak_mean"]]
+        .mean()
+        .mul(100)
+        .reset_index()
+    )
 
-display(mean_det)
-display(mean_other)
-display(max_per_label)
+    mean_det = mean_det.round(0)
+    mean_other = mean_other.round(0)
+    max_per_label = max_per_label.round(0)
+
+    display(mean_det)
+    display(mean_other)
+    display(max_per_label)
 
 # ==== Taux de détection en fonction de la vitesse d'éjection et de la distance
-df_det_grouped = compute_detection_dataframe(
-    df_stat_local, df_positions, df_config, Tests_correspondances
-)
-
-
-df_test_summary = create_test_summary(df_stat_local, df_config, Tests_correspondances)
-display(df_test_summary)
+    df_det_grouped = compute_detection_dataframe(
+        df_stat_local, df_positions, df_config, Tests_correspondances
+    )
+    df_test_summary = create_test_summary(df_stat_local, df_config, Tests_correspondances)
+    display(df_test_summary)
 
 
 # ======================================================================================================================
@@ -1172,40 +1279,17 @@ display(df_test_summary)
 # ====================
 # === Static visu. ===
 # ====================
+if local_analysis:
+    table_theo, table_real = plot_detection_vs_distance(df_det_grouped, df_config, Tests_correspondances)
 
-table_theo, table_real = plot_detection_vs_distance(df_det_grouped, df_config, Tests_correspondances)
 
 # =====================
 # === Dynamic visu. ===
 # =====================
 
-freq_categories = ['0-1 kHz', '1-5 kHz', '5-15 kHz', '15-45 kHz', 'leak']
+freq_categories = freq_categories + ['leak']
 
-test_selector = widgets.Dropdown(
-    options=df_stat_deployment['Test N°'].unique(),
-    description='Test N°:',
-    value=df_stat_deployment['Test N°'].unique()[0]
-)
-
-# --- Dropdown pour choisir le type de visualisation ---
-display_mode_selector = widgets.Dropdown(
-    options=[
-        ('ML leak + localisation', 'ml_loc'),
-        ('ML model vs Expert model', 'ml_vs_expert')
-    ],
-    description='Mode affichage :',
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='300px')
-)
-
-# --- Widget pour sélectionner le label / test ---
-label_selector = widgets.Dropdown(
-    options=sorted(df_stat_local['label'].unique()),
-    description='Label :',
-    style={'description_width': 'initial'},
-    layout=widgets.Layout(width='300px')
-)
-
+# --- Selecteur Test ---
 test_selector = widgets.Dropdown(
     options=df_stat_deployment['Test N°'].unique(),
     description='Test N° :',
@@ -1213,20 +1297,88 @@ test_selector = widgets.Dropdown(
     layout=widgets.Layout(width='300px')
 )
 
-# --- Fonction qui choisit quelle mise à jour appliquer ---
+# -------------------------
+# --- Modes dynamiques ---
+# -------------------------
+
+if local_analysis:
+    mode_options = [
+        ('ML leak + localisation', 'ml_loc'),
+        ('ML model vs Expert model', 'ml_vs_expert')
+    ]
+else:
+    mode_options = [
+        ('ML leak + localisation', 'ml_loc')
+    ]
+
+display_mode_selector = widgets.Dropdown(
+    options=mode_options,
+    description='Mode affichage :',
+    style={'description_width': 'initial'},
+    layout=widgets.Layout(width='300px')
+)
+
+# -------------------------
+# --- Selecteur Label ---
+# -------------------------
+
+if local_analysis:
+    label_selector = widgets.Dropdown(
+        options=sorted(df_stat_local['label'].unique()),
+        description='Label :',
+        style={'description_width': 'initial'},
+        layout=widgets.Layout(width='300px')
+    )
+else:
+    # widget dummy invisible mais requis pour update_display()
+    label_selector = widgets.Dropdown(
+        options=[],
+        layout=widgets.Layout(display="none")
+    )
+
+# ======================================================================
+# === Save figures automatically (optional) =============================
+# ======================================================================
+if save_fig:
+
+    def save_current_figure(fig, name, folder="plots"):
+        os.makedirs(folder, exist_ok=True)
+        filepath = os.path.join(folder, f"{name}.png")
+        fig.write_image(filepath, scale=2)
+        print(f"Figure Plotly sauvegardée → {filepath}")
+
+    modes = [m[1] for m in mode_options]
+    labels = label_selector.options
+    tests = test_selector.options
+
+    for mode in modes:
+        if mode == 'ml_loc':
+            for test_num in tests:
+                if pd.notna(test_num):
+                    fig = update_plot_deployment(test_num)
+                    save_current_figure(fig, f"{mode}_{test_num}")
+        elif mode == 'ml_vs_expert' and local_analysis:
+            for label in labels:
+                fig = update_plot_local(label)
+                save_current_figure(fig, f"{mode}_{label}")
+
+# ======================================================================
+# === Fonction d'affichage dynamique ===================================
+# ======================================================================
 def update_display(mode, label, test_num):
     if mode == 'ml_loc':
-        # ML leak + localisation → n'affiche que si test_num valide
         if pd.notna(test_num):
-            update_plot_deployment(test_num)
+            fig = update_plot_deployment(test_num)
+            fig.show()
         else:
-            print(f"Aucun test valide pour ce label, affichage impossible")
-    elif mode == 'ml_vs_expert':
-        # ML vs Expert → utilise label
-        update_plot_local(label)
+            print("Aucun test valide.")
+    elif mode == 'ml_vs_expert' and local_analysis:
+        fig = update_plot_local(label)
+        fig.show()
 
-
-# --- Widget interactif combiné ---
+# ======================================================================
+# === Liaison interactive ===============================================
+# ======================================================================
 out = widgets.interactive_output(
     update_display,
     {
@@ -1236,21 +1388,26 @@ out = widgets.interactive_output(
     }
 )
 
-# --- Affichage des widgets ---
 display(widgets.HBox([display_mode_selector, label_selector, test_selector]), out)
 
-# --- Optionnel : masquage dynamique de label/test selon le mode ---
+# ======================================================================
+# === Masquage dynamique label/test selon mode ==========================
+# ======================================================================
 def toggle_inputs(change):
-    if change['new'] == 'ml_loc':
-        label_selector.layout.display = 'none'
+    mode = change['new']
+
+    if mode == 'ml_loc':
         test_selector.layout.display = 'block'
-    else:
-        label_selector.layout.display = 'block'
+        label_selector.layout.display = 'none'
+    else:  # ml_vs_expert
+        if local_analysis:
+            label_selector.layout.display = 'block'
         test_selector.layout.display = 'none'
 
 display_mode_selector.observe(toggle_inputs, names='value')
-toggle_inputs({'new': display_mode_selector.value})
 
+# appliquer immédiatement
+toggle_inputs({'new': display_mode_selector.value})
 
 
 # %%
